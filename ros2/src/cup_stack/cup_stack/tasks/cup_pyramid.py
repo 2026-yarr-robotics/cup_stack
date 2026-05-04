@@ -22,6 +22,7 @@ class CupPyramidTask:
     def try_execute(
         self,
         pick_xy: tuple[float, float] | None = None,
+        place_xy: tuple[float, float] | None = None,
         move_home: bool = True,
     ) -> bool:
         """Execute the full pyramid build task."""
@@ -37,8 +38,12 @@ class CupPyramidTask:
             pick_x, pick_y = self.runtime.current_ee_xy()
         else:
             pick_x, pick_y = pick_xy
-        pyramid_cx = pick_x + self.config.place_x_offset
-        pyramid_cy = pick_y
+
+        if place_xy is None:
+            pyramid_cx = pick_x + self.config.place_x_offset
+            pyramid_cy = pick_y
+        else:
+            pyramid_cx, pyramid_cy = place_xy
         target_x, target_y = pyramid_cx, pyramid_cy
 
         for index in range(self.config.total_cups):

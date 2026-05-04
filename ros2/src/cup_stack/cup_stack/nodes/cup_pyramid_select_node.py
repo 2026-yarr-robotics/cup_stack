@@ -27,6 +27,8 @@ def main(args=None):
         node.get_logger().info("[0] Moving HOME")
         if not runtime.try_move_home():
             return
+        place_xy = runtime.current_ee_xy()
+        node.get_logger().info(f"Pyramid center: ({place_xy[0]:.3f}, {place_xy[1]:.3f})")
 
         selector = CameraClickSelector(node, runtime)
         selected = selector.select_point()
@@ -36,7 +38,7 @@ def main(args=None):
 
         pick_x, pick_y, _ = selected
         task = CupPyramidTask(runtime, nest_inc=nest_inc)
-        task.try_execute(pick_xy=(pick_x, pick_y), move_home=False)
+        task.try_execute(pick_xy=(pick_x, pick_y), place_xy=place_xy, move_home=False)
     finally:
         executor.shutdown()
         node.destroy_node()
