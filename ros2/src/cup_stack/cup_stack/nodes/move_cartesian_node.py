@@ -1,7 +1,7 @@
 """ROS 2 node: move robot end-effector + gripper control via ROS services."""
 
 import rclpy
-from cup_stack.config import GripperConfig, MotionConfig
+from cup_stack.config import CupStackConfig, MotionConfig
 from cup_stack.runtime import CupStackRuntime
 from cup_stack_interfaces.srv import MoveCartesian
 from rclpy.node import Node
@@ -78,11 +78,11 @@ def main(args=None):
         node.get_logger().info(f"Gripper command: {cmd}")
         try:
             if cmd == "open":
-                runtime.try_open_gripper(GripperConfig().open_sleep_sec)
+                runtime.try_open_gripper(CupStackConfig().open_sleep_sec)
                 response.success = True
                 response.message = "Gripper opened"
             elif cmd == "close":
-                runtime.try_grip_cup(GripperConfig().grip_sleep_sec)
+                runtime.try_grip_cup(CupStackConfig().grip_sleep_sec)
                 response.success = True
                 response.message = "Gripper closed"
             else:
