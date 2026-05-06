@@ -27,6 +27,19 @@ def generate_launch_description():
         [FindPackageShare("cup_stack"), "config", "moveit_py.yaml"]
     )
 
+    # Static transform: link_6 → camera_link (hand-in-eye calibration, T_gripper2camera^{-1})
+    # Translation in meters, quaternion in xyzw order
+    camera_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        arguments=[
+            "0.038400", "0.058850", "-0.005715",
+            "0.002446", "-0.003002", "0.999861", "0.016209",
+            "link_6", "camera_link",
+        ],
+        output="screen",
+    )
+
     return LaunchDescription(
         [
             Node(
@@ -38,5 +51,6 @@ def generate_launch_description():
                     moveit_py_params,
                 ],
             ),
+            camera_tf,
         ]
     )
