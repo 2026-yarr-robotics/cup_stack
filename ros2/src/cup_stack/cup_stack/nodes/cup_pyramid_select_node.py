@@ -14,7 +14,7 @@ from cup_stack.vision import CameraClickSelector
 def main(args=None):
     rclpy.init(args=args)
     node = Node("cup_pyramid_select_node")
-    node.declare_parameter("nest_inc", 0.0247)
+    node.declare_parameter("nest_inc", 0.0145)
 
     executor = MultiThreadedExecutor()
     executor.add_node(node)
