@@ -51,6 +51,7 @@ setup(
             "cup_stack.nodes.cup_unstack_web_node:main",
             "camera_capture = cup_stack.nodes.camera_capture_node:main",
             "move_cartesian = cup_stack.nodes.move_cartesian_node:main",
+            "find_vertical_home = cup_stack.nodes.find_vertical_home_node:main",
         ],
     },
 )

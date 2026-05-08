@@ -61,11 +61,11 @@ class CupPyramidTask:
             ):
                 return False
 
-        self.logger.info("\n[END] Moving to SAFE_Z")
+        self.logger.info("\n[END] Moving to PICK_SAFE_Z")
         self.runtime.try_move_to_pose(
             target_x,
             target_y,
-            self.config.safe_z,
+            self.config.pick_safe_z,
             self.config.safe_z_min,
             ori=DOWN_ORI,
         )
@@ -110,7 +110,7 @@ class CupPyramidTask:
             return False
         if not self.try_place_cup(cycle, target_x, target_y, place_z):
             return False
-        return self.try_lift_from_place(cycle, target_x, target_y)
+        return self.try_lift_from_place(cycle, target_x, target_y, place_z)
 
     def try_move_to_pick_safe(
         self,
@@ -186,14 +186,16 @@ class CupPyramidTask:
         target_x: float,
         target_y: float,
     ) -> bool:
+        # safe_z(0.55) 대신 pick_safe_z(0.45)로 이동 — z 안 올리고 대각선 이동
+        travel_z = self.config.pick_safe_z
         self.logger.info(
-            f"  [6] target XY move ({target_x:.3f}, {target_y:.3f}) @ SAFE_Z"
+            f"  [6] target XY move ({target_x:.3f}, {target_y:.3f}) @ z={travel_z:.3f}"
         )
         return self._require(
             self.runtime.try_move_to_pose(
                 target_x,
                 target_y,
-                self.config.safe_z,
+                travel_z,
                 self.config.safe_z_min,
             ),
             6,
@@ -207,11 +209,19 @@ class CupPyramidTask:
         target_y: float,
         place_z: float,
     ) -> bool:
-        mid_z = place_z + (self.config.safe_z - place_z) / 2.0
+        # approach_z = pick_safe_z 기준으로 mid_z 계산
+        approach_z = self.config.pick_safe_z
+        if approach_z > place_z:
+            # 위에서 내려오는 경우 (layer 0, 1)
+            mid_z = place_z + (approach_z - place_z) / 2.0
+        else:
+            # 아래에서 올라가는 경우 (layer 2): place_z보다 약간 위
+            mid_z = place_z + 0.02
+
         half_twist = make_twist_orientation(self.config.place_twist_deg / 2.0)
         full_twist = make_twist_orientation(self.config.place_twist_deg)
 
-        self.logger.info(f"  [7a] place mid descend -> z={mid_z:.3f}")
+        self.logger.info(f"  [7a] place mid -> z={mid_z:.3f}")
         if not self._require(
             self.runtime.try_move_to_pose(
                 target_x,
@@ -225,7 +235,7 @@ class CupPyramidTask:
         ):
             return False
 
-        self.logger.info(f"  [7b] place final descend -> z={place_z:.3f}")
+        self.logger.info(f"  [7b] place final -> z={place_z:.3f}")
         if not self._require(
             self.runtime.try_move_to_pose(
                 target_x,
@@ -247,15 +257,19 @@ class CupPyramidTask:
         cycle: int,
         target_x: float,
         target_y: float,
+        place_z: float,
     ) -> bool:
-        self.logger.info("  [9] lift -> SAFE_Z")
+        # place_z보다 반드시 높게 lift; layer 2(z=0.498)는 pick_safe_z(0.45)보다 위
+        lift_z = max(self.config.pick_safe_z, place_z + 0.02)
+        full_twist = make_twist_orientation(self.config.place_twist_deg)
+        self.logger.info(f"  [9] lift -> z={lift_z:.3f}")
         return self._require(
             self.runtime.try_move_to_pose(
                 target_x,
                 target_y,
-                self.config.safe_z,
+                lift_z,
                 self.config.safe_z_min,
-                ori=DOWN_ORI,
+                ori=full_twist,
             ),
             9,
             cycle,
