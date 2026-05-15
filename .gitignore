@@ -20,3 +20,6 @@ htmlcov/
 
 # Runtime logs
 *.log
+
+# Claude Code worktrees / local agent state
+.claude/
