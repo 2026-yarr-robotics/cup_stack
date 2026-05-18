@@ -106,11 +106,15 @@ class GripperConfig:
 
 @dataclass(frozen=True)
 class CameraConfig:
-    """Camera topics and hand-eye calibration config."""
+    """Camera topics and hand-eye calibration config.
 
-    camera_info_topic: str = "/camera/camera/color/camera_info"
-    color_topic: str = "/camera/camera/color/image_raw"
-    depth_topic: str = "/camera/camera/aligned_depth_to_color/image_raw"
+    Vision uses the eye-in-hand (gripper-mounted) camera, launched under
+    the ``hand`` namespace (RealSense serial 140122076335).
+    """
+
+    camera_info_topic: str = "/hand/hand/color/camera_info"
+    color_topic: str = "/hand/hand/color/image_raw"
+    depth_topic: str = "/hand/hand/aligned_depth_to_color/image_raw"
     handeye_file: str = "T_gripper2camera.npy"
     depth_search_radius_px: int = 30
 
