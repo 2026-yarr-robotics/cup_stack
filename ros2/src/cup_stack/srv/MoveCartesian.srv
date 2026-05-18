@@ -1,8 +1,0 @@
-# Move robot end-effector to specified Cartesian position
-float64 x
-float64 y
-float64 z
-string mode  # "absolute" or "relative"
----
-bool success
-string message

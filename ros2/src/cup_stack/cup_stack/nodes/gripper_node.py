@@ -2,7 +2,7 @@
 
 Does NOT create a MoveItPy instance, so it can run alongside cup_pyramid / cup_unstack
 without conflicting over the planning scene monitor.
-Registers /gripper_control service (same interface as move_cartesian_node).
+Registers /gripper_control service (cup_stack_interfaces/srv/GripperControl).
 """
 from __future__ import annotations
 
