@@ -285,27 +285,41 @@ dsr_moveit_controller      joint_trajectory_controller/JointTrajectoryController
 
 <p>spawner 노드는 controller_manager 서비스를 호출해 <strong>load → configure → activate</strong>를 한 번에 수행하고 즉시 종료. 컨트롤러는 컨트롤러 매니저 내부에 등록된 상태로 남는다 (skill_api 노드 수명과 무관).</p>
 
-<h3>네임스페이스 정합 (action remap)</h3>
+<h3>네임스페이스 정합 (skill_api Node를 /dsr01 namespace에)</h3>
 
 <p>
-  MoveIt의 <code>moveit_simple_controller_manager</code>는
-  <code>moveit_controllers.yaml</code>의 controller 이름을 그대로 액션 prefix로 사용:
-  <code>/dsr_moveit_controller/follow_joint_trajectory</code>. 그러나 실제 컨트롤러는
-  <code>/dsr01/controller_manager</code> 아래에서 활성화되므로 액션 경로는
+  MoveIt의 <code>moveit_simple_controller_manager</code>는 controller 이름을
+  <strong>상대명</strong>으로 사용해 액션 client를 만든다
+  (<code>&lt;name&gt;/follow_joint_trajectory</code>). 실제 컨트롤러는
+  <code>/dsr01/controller_manager</code> 아래에서 활성화되어 액션 서버 경로는
   <code>/dsr01/dsr_moveit_controller/follow_joint_trajectory</code>.
 </p>
 
 <p>
-  <code>skill_api.launch.py</code>의 Node remappings로 5개 action 서브토픽을 매핑:
+  <code>moveit_simple_controller_manager</code>는 MoveIt 내부에서 별개의 노드로
+  생성되므로 launch의 <code>Node(remappings=[...])</code>로는 그 노드의 이름 해석에
+  영향을 주지 못한다 (실제로 적용해 봤더니 동작 안 함). 가장 안전한 방법은
+  <strong>부모 ROS 노드의 namespace 자체를 <code>/dsr01</code>로 두는 것</strong>:
 </p>
 
-<pre><code>_fjt_remaps = [
-    (f"/dsr_moveit_controller/follow_joint_trajectory/_action/{sub}",
-     f"/dsr01/dsr_moveit_controller/follow_joint_trajectory/_action/{sub}")
-    for sub in ("send_goal", "cancel_goal", "get_result", "feedback", "status")
-]</code></pre>
+<pre><code>Node(
+    package="cup_stack",
+    executable="skill_api_server",
+    namespace="/dsr01",          # ← 핵심
+    parameters=[...],
+)</code></pre>
 
-<p>이로써 <code>moveit_simple_controller_manager</code>의 액션 클라이언트가 정확한 서버에 연결.</p>
+<p>
+  이러면 내부 <code>moveit_simple_controller_manager</code>의 상대명
+  <code>dsr_moveit_controller/follow_joint_trajectory</code>이 자연스럽게
+  <code>/dsr01/dsr_moveit_controller/follow_joint_trajectory</code>로 해석되어
+  JTC와 연결된다. 별도 remap 불필요.
+</p>
+
+<p class="small">
+  부수효과: <code>skill_api_node</code> 자체도 <code>/dsr01/skill_api_node</code>가
+  된다. 외부 HTTP 인터페이스(:8765)와 도메인 로직에는 영향 없음.
+</p>
 
 <h2 id="trajectory">Trajectory 실행 경로</h2>
 
@@ -376,7 +390,7 @@ Doosan DRFL  ──TCP:12345──▶ M0609 Robot Controller
 <tr><td>HTTP 504 / 60s timeout</td><td><code>curl :8099/task/status?name=skill_api</code></td><td>skill_api lazy 시작 실패 (모듈/포트/MoveIt init)</td></tr>
 <tr><td>"Unable to configure planning scene monitor"</td><td><code>ros2 topic hz /dsr01/joint_states</code></td><td>로봇 분리 또는 namespace mismatch</td></tr>
 <tr><td>planning 성공하나 모션 안 함</td><td><code>ros2 action info /dsr01/dsr_moveit_controller/follow_joint_trajectory</code> (Action servers: 0이면)</td><td>JTC 미spawn — <code>dsr_moveit_controller</code> 활성화 필요</td></tr>
-<tr><td>plan OK, "Action client not connected"</td><td>위와 동일 + remappings 확인</td><td>네임스페이스 정합 미설정</td></tr>
+<tr><td>plan OK, "Action client not connected"</td><td><code>ros2 node info /dsr01/moveit_simple_controller_manager</code> &mdash; Action Clients가 <code>/dsr01/dsr_moveit_controller/follow_joint_trajectory</code>인지 확인</td><td>skill_api Node가 <code>namespace="/dsr01"</code> 미설정</td></tr>
 <tr><td>API는 success인데 arm은 안 움직임</td><td>skill_api 로그에 "Trajectory execution failed" 없음</td><td>execute() 반환값 미검증 (이미 commit f949615로 수정)</td></tr>
 <tr><td>(0, 0)으로 픽 → IK 실패</td><td>"Unable to find IK solution"</td><td>M0609 베이스 직상 운동학적 특이점 — 워크스페이스 좌표 사용</td></tr>
 </table>

@@ -22,6 +22,17 @@ from launch_ros.substitutions import FindPackageShare
 from moveit_configs_utils import MoveItConfigsBuilder
 
 
+# Bringup (dsr_bringup2_rviz.launch.py) places controller_manager and all
+# controllers under /dsr01. MoveIt's moveit_simple_controller_manager creates
+# its action client using the configured controller name as a *relative* name
+# (`<controller>/follow_joint_trajectory`), so the only way to make it bind
+# to /dsr01/dsr_moveit_controller/follow_joint_trajectory is to put the
+# parent ROS node itself under /dsr01.  Then relative name resolution does
+# the right thing without launch-level remappings (which don't propagate to
+# the controller_manager's internal node).
+ROBOT_NAMESPACE = "/dsr01"
+
+
 def generate_launch_description():
     """Build the launch description for the skill API server."""
 
@@ -47,7 +58,7 @@ def generate_launch_description():
     # dsr_bringup2_rviz.launch.py spawns only dsr_controller2 (Doosan SDK-direct,
     # claims no ros2_control command interfaces). MoveIt needs a standard
     # FollowJointTrajectory controller, so activate dsr_moveit_controller against
-    # the namespaced controller_manager. Doosan's own demo.launch.py spawns
+    # the namespaced controller_manager.  Doosan's own demo.launch.py spawns
     # both controllers side-by-side, so coexistence is the intended config.
     dsr_moveit_controller_spawner = Node(
         package="controller_manager",
@@ -59,18 +70,6 @@ def generate_launch_description():
         ],
         output="screen",
     )
-
-    # Bringup runs the controller_manager under /dsr01, but MoveIt's
-    # simple_controller_manager builds action names as
-    # `<controller_name>/follow_joint_trajectory` with no namespace. Remap
-    # the five action sub-topics so they bind to the /dsr01-scoped server.
-    _fjt_remaps = [
-        (
-            f"/dsr_moveit_controller/follow_joint_trajectory/_action/{sub}",
-            f"/dsr01/dsr_moveit_controller/follow_joint_trajectory/_action/{sub}",
-        )
-        for sub in ("send_goal", "cancel_goal", "get_result", "feedback", "status")
-    ]
 
     return LaunchDescription(
         [
@@ -86,6 +85,7 @@ def generate_launch_description():
             Node(
                 package="cup_stack",
                 executable="skill_api_server",
+                namespace=ROBOT_NAMESPACE,
                 output="screen",
                 parameters=[
                     moveit_config.to_dict(),
@@ -101,7 +101,6 @@ def generate_launch_description():
                         "nest_inc": LaunchConfiguration("nest_inc"),
                     },
                 ],
-                remappings=_fjt_remaps,
             ),
         ]
     )
