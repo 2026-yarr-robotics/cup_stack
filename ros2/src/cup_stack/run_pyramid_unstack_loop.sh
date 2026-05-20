@@ -13,6 +13,10 @@ set -e
 ROS_DISTRO=${ROS_DISTRO:-humble}
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+# Source-built MoveIt overlay (provides moveit_configs_utils, moveit_py, ...).
+# Override with MOVEIT_WS_SETUP if you keep MoveIt somewhere else.
+MOVEIT_WS_SETUP=${MOVEIT_WS_SETUP:-$HOME/ws_moveit/install/setup.bash}
+
 CYCLES=${1:-inf}
 NEST_INC=${2:-0.012}
 
@@ -30,6 +34,14 @@ find_workspace_setup() {
 
 # shellcheck source=/dev/null
 source "/opt/ros/${ROS_DISTRO}/setup.bash"
+
+if [ -f "$MOVEIT_WS_SETUP" ]; then
+    # shellcheck source=/dev/null
+    source "$MOVEIT_WS_SETUP"
+else
+    echo "[WARN] MoveIt overlay not found at $MOVEIT_WS_SETUP. " \
+         "Set MOVEIT_WS_SETUP=/path/to/ws_moveit/install/setup.bash if needed." >&2
+fi
 
 WORKSPACE_SETUP=$(find_workspace_setup || true)
 if [ -n "$WORKSPACE_SETUP" ]; then
