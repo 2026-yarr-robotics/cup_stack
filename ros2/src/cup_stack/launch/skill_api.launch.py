@@ -1,10 +1,17 @@
 """Launch the CupStack Skill API server with MoveItPy params.
 
-``host`` (default ``0.0.0.0``), ``port`` (default ``8765``), and
-``cup_grip_z_offset`` (default ``0.10``, metres from cup-top centre
-to gripper grip point — calibrate to actual cup geometry) are launch
-arguments.  ``move_home`` (default ``false``) moves the arm to HOME
-before the server begins accepting requests.
+Launch arguments:
+  - ``host`` (default ``0.0.0.0``), ``port`` (default ``8765``)
+  - ``move_home`` (default ``false``): move the arm to HOME before
+    the server starts accepting requests.
+  - ``cup_grip_z_offset`` (default ``0.10`` m): vertical distance
+    from cup-top centre to the gripper grip point — calibrate to
+    the actual cup geometry.
+  - ``pick_z_base`` (default ``0.323`` m): gripper Z when picking
+    the top of a 1-cup nested source stack. Used by /skill/pick when
+    the caller supplies ``nested_count`` instead of an explicit Z.
+  - ``nest_inc`` (default ``0.012`` m): rise per additional nested
+    cup. ``pick_z = pick_z_base + (nested_count - 1) * nest_inc``.
 """
 
 from launch import LaunchDescription
@@ -45,6 +52,8 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "cup_grip_z_offset", default_value="0.10"
             ),
+            DeclareLaunchArgument("pick_z_base", default_value="0.323"),
+            DeclareLaunchArgument("nest_inc", default_value="0.012"),
             Node(
                 package="cup_stack",
                 executable="skill_api_server",
@@ -59,6 +68,8 @@ def generate_launch_description():
                         "cup_grip_z_offset": LaunchConfiguration(
                             "cup_grip_z_offset"
                         ),
+                        "pick_z_base": LaunchConfiguration("pick_z_base"),
+                        "nest_inc": LaunchConfiguration("nest_inc"),
                     },
                 ],
             ),
