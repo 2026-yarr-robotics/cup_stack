@@ -92,11 +92,18 @@ class CupStackRuntime:
             self.logger.error("HOME planning failed")
             return False
 
-        self.robot.execute(
+        exec_result = self.robot.execute(
             group_name=self.motion.group_name,
             robot_trajectory=plan_result.trajectory,
             blocking=True,
         )
+        # MoveItPy returns truthy on SUCCESS, falsy on ABORTED/FAILED/PREEMPTED.
+        # Without this check ABORTED executions (e.g. controller not connected)
+        # were leaking through as success — the skill would proceed to the next
+        # step on a robot that never moved.
+        if not exec_result:
+            self.logger.error("Trajectory execution failed")
+            return False
         return True
 
     def try_move_to_pose(
@@ -156,11 +163,14 @@ class CupStackRuntime:
             self.logger.error("Planning failed")
             return False
 
-        self.robot.execute(
+        exec_result = self.robot.execute(
             group_name=self.motion.group_name,
             robot_trajectory=plan_result.trajectory,
             blocking=True,
         )
+        if not exec_result:
+            self.logger.error("Trajectory execution failed")
+            return False
         return True
 
     def _joint_rotation_constraints(
