@@ -231,14 +231,17 @@ init();
 class PickRequest(BaseModel):
     """Body for POST /skill/pick.
 
-    Supply either ``z`` (raw gripper Z) or ``cup_top_z`` (cup-top
-    centre Z, converted server-side using ``cup_grip_z_offset``).
+    Supply one of ``z`` (raw gripper Z), ``cup_top_z`` (cup-top centre
+    Z, converted to gripper Z via ``+ cup_grip_z_offset``), or
+    ``nested_count`` (server derives gripper Z from
+    ``pick_z_base + (nested_count - 1) * nest_inc``).
     """
 
     x: float
     y: float
     z: float | None = None
     cup_top_z: float | None = None
+    nested_count: int | None = None
     ori: dict | None = None
 
 
@@ -279,6 +282,10 @@ app = FastAPI(title="CupStack Skill API")
 _runtime: CupStackRuntime | None = None
 _lock = threading.Lock()
 _cup_grip_z_offset: float = SkillStackConfig().cup_grip_z_offset
+# Geometry used when /skill/pick is called with ``nested_count`` instead of
+# an explicit Z.  Defaults mirror SkillStackConfig + cup_pyramid.launch.py.
+_pick_z_base: float = SkillStackConfig().pick_z_base
+_nest_inc: float = 0.012
 
 
 def _check_busy() -> None:
@@ -297,42 +304,53 @@ def frontend() -> str:
 
 @app.get("/status")
 def status() -> dict:
-    """Return server liveness, busy state, and cup_grip_z_offset."""
+    """Return server liveness, busy state, and pick-Z geometry."""
 
     return {
         "ready": _runtime is not None,
         "busy": _lock.locked(),
         "cup_grip_z_offset": _cup_grip_z_offset,
+        "pick_z_base": _pick_z_base,
+        "nest_inc": _nest_inc,
     }
+
+
+def _resolve_pick_z(req: "PickRequest") -> tuple[float, str]:
+    """Pick precedence: ``z`` > ``cup_top_z`` > ``nested_count``."""
+
+    if req.z is not None:
+        return req.z, f"gripper_z={req.z:.4f}"
+    if req.cup_top_z is not None:
+        gz = req.cup_top_z + _cup_grip_z_offset
+        return gz, f"cup_top_z={req.cup_top_z:.4f} → gripper_z={gz:.4f}"
+    if req.nested_count is not None:
+        if req.nested_count < 1:
+            raise HTTPException(
+                status_code=422, detail="'nested_count' must be >= 1"
+            )
+        gz = _pick_z_base + (req.nested_count - 1) * _nest_inc
+        return gz, f"nested_count={req.nested_count} → gripper_z={gz:.4f}"
+    raise HTTPException(
+        status_code=422,
+        detail="provide 'z', 'cup_top_z', or 'nested_count'",
+    )
 
 
 @app.post("/skill/pick", response_model=SkillResponse)
 def skill_pick(req: PickRequest) -> SkillResponse:
     """Pick a cup from the given coordinate.
 
-    Accepts either ``z`` (raw gripper Z) or ``cup_top_z`` (cup-top
-    centre Z).  When ``cup_top_z`` is given the actual gripper Z is
-    ``cup_top_z + cup_grip_z_offset`` (configurable node parameter).
+    Accepts ``z`` (raw gripper Z), ``cup_top_z`` (cup-top centre Z,
+    converted via ``+ cup_grip_z_offset``), or ``nested_count``
+    (gripper Z = ``pick_z_base + (nested_count - 1) * nest_inc``).
     """
 
-    if req.z is None and req.cup_top_z is None:
-        raise HTTPException(
-            status_code=422,
-            detail="provide 'z' (gripper Z) or 'cup_top_z'",
-        )
-    pick_z = (
-        req.z
-        if req.z is not None
-        else req.cup_top_z + _cup_grip_z_offset
-    )
+    pick_z, detail = _resolve_pick_z(req)
     _check_busy()
     try:
         skill = PickCupSkill(_runtime, req.x, req.y, pick_z, ori=req.ori)
         ok = skill.execute()
-        return SkillResponse(
-            success=ok, skill="pick",
-            detail=f"gripper_z={pick_z:.4f}",
-        )
+        return SkillResponse(success=ok, skill="pick", detail=detail)
     finally:
         _lock.release()
 
@@ -399,16 +417,16 @@ def skill_scan() -> SkillResponse:
 def main(args=None) -> None:
     """Run the skill API server node."""
 
+    global _runtime, _cup_grip_z_offset, _pick_z_base, _nest_inc
     rclpy.init(args=args)
     node = Node("skill_api_node")
     node.declare_parameter("host", "0.0.0.0")
     node.declare_parameter("port", 8765)
     node.declare_parameter("move_home", False)
-    node.declare_parameter(
-        "cup_grip_z_offset", SkillStackConfig().cup_grip_z_offset
-    )
-
-    global _runtime, _cup_grip_z_offset
+    cfg = SkillStackConfig()
+    node.declare_parameter("cup_grip_z_offset", cfg.cup_grip_z_offset)
+    node.declare_parameter("pick_z_base", cfg.pick_z_base)
+    node.declare_parameter("nest_inc", _nest_inc)
     try:
         host = str(node.get_parameter("host").value)
         port = int(node.get_parameter("port").value)
@@ -416,8 +434,14 @@ def main(args=None) -> None:
         _cup_grip_z_offset = float(
             node.get_parameter("cup_grip_z_offset").value
         )
+        _pick_z_base = float(node.get_parameter("pick_z_base").value)
+        _nest_inc = float(node.get_parameter("nest_inc").value)
         log = node.get_logger()
-        log.info(f"cup_grip_z_offset={_cup_grip_z_offset:.4f} m")
+        log.info(
+            f"cup_grip_z_offset={_cup_grip_z_offset:.4f} m  "
+            f"pick_z_base={_pick_z_base:.4f} m  "
+            f"nest_inc={_nest_inc:.4f} m"
+        )
 
         _runtime = CupStackRuntime(node, "skill_api_moveit_py")
 
