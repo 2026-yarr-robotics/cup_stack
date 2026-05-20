@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>CupStack System Architecture</title>
+<style>
+  :root {
+    --bg: #0f1115; --fg: #e8e8e8; --muted: #9aa0a6;
+    --accent: #5dd5fc; --warn: #f7c948; --err: #ff6b6b;
+    --card: #181b22; --border: #2a2f3a; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 1100px; margin: 0 auto; padding: 32px 24px; line-height: 1.55; }
+  h1, h2, h3 { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h1 { font-size: 28px; }
+  h2 { font-size: 22px; margin-top: 36px; }
+  h3 { font-size: 17px; color: #cfd6e4; border-bottom: 0; margin-top: 24px; }
+  code, pre { font-family: var(--mono); }
+  code { background: #232833; padding: 1px 5px; border-radius: 3px; font-size: 0.92em; }
+  pre { background: var(--card); border: 1px solid var(--border); padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.45; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #1d2230; color: var(--accent); }
+  .muted { color: var(--muted); }
+  .warn { color: var(--warn); }
+  .err  { color: var(--err); }
+  .card { background: var(--card); border: 1px solid var(--border); padding: 14px 16px; border-radius: 6px; margin: 14px 0; }
+  .pill { display: inline-block; background: #232833; color: #cfd6e4; border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; font-size: 12px; font-family: var(--mono); }
+  ul { padding-left: 22px; }
+  li { margin: 4px 0; }
+  hr { border: 0; border-top: 1px dashed var(--border); margin: 24px 0; }
+  .ascii { white-space: pre; font-family: var(--mono); font-size: 12.5px; line-height: 1.35; background: var(--card); border: 1px solid var(--border); padding: 14px; border-radius: 6px; overflow-x: auto; }
+  .toc a { color: #cfd6e4; text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .small { font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>CupStack System Architecture</h1>
+<p class="muted">
+  Doosan M0609 + RG 그리퍼 기반 컵 스태킹 시스템의 전체 구조 및 ros2_control / MoveIt
+  컨트롤러 관리 원리. 프론트엔드, FastAPI 서버, ROS 2 스택, 하드웨어 계층을 단일 문서로 정리.
+</p>
+<p class="small">Last updated: 2026-05-20 (commit f949615)</p>
+
+<div class="toc card">
+  <strong>목차</strong>
+  <ol>
+    <li><a href="#layers">전체 계층</a></li>
+    <li><a href="#process-topology">프로세스 토폴로지</a></li>
+    <li><a href="#frontend">프론트엔드 (React + Vite)</a></li>
+    <li><a href="#server">FastAPI 서버 + Nginx</a></li>
+    <li><a href="#bringup-agent">Bringup Agent</a></li>
+    <li><a href="#ros2">ROS 2 스택</a></li>
+    <li><a href="#controllers">컨트롤러 관리 원리 (핵심)</a></li>
+    <li><a href="#trajectory">Trajectory 실행 경로</a></li>
+    <li><a href="#pick-flow">픽 명령의 end-to-end 흐름</a></li>
+    <li><a href="#diagnostics">진단 레시피</a></li>
+  </ol>
+</div>
+
+<h2 id="layers">전체 계층</h2>
+
+<div class="ascii">
+┌───────────────────────────────────────────────────────────────────────────┐
+│  Browser (사용자)                                                         │
+│   ─ CommandInput → fetch POST /api/robot/skill/pick                       │
+└───────────────────────────────────────────────────────────────────────────┘
+                                  │  HTTPS
+                                  ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│  Cloudflare Tunnel (yarr-api.simplyimg.com) → Host Nginx (:80)            │
+└───────────────────────────────────────────────────────────────────────────┘
+                                  │  HTTP
+                ┌─────────────────┼────────────────────┐
+                ▼                 ▼                    ▼
+        FastAPI robot:8001  handineye:8002       handtoeye:8003     (Docker)
+                │ rosbridge WS (host.docker.internal:9090)
+                │ skill_api proxy (host.docker.internal:8765)
+                │ bringup agent  (host.docker.internal:8099)
+                ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│  Host PC (ROS 2 Humble, no docker)                                        │
+│    rosbridge_websocket  bringup_agent.py  skill_api_node  dsr_bringup2    │
+│      :9090                 :8099            :8765           /dsr01/*      │
+│                                                                           │
+│    ros2_control_node ─── joint_state_broadcaster                          │
+│      (/dsr01/         ┬── dsr_controller2          (active, Doosan SDK)   │
+│      controller_      └── dsr_moveit_controller    (active, JTC)          │
+│      manager)                                                             │
+└───────────────────────────────────────────────────────────────────────────┘
+                                  │  DRFL TCP :12345
+                                  ▼
+                          Doosan M0609 controller + RG 그리퍼
+</div>
+
+<h2 id="process-topology">프로세스 토폴로지</h2>
+
+<table>
+<tr><th>위치</th><th>프로세스</th><th>포트/네임스페이스</th><th>역할</th></tr>
+<tr><td>Docker</td><td><code>server-nginx</code></td><td>:80</td><td>SPA 정적 서빙 + 백엔드 라우팅</td></tr>
+<tr><td>Docker</td><td><code>server-robot</code> (FastAPI)</td><td>:8001 (internal)</td><td><code>/api/robot/*</code>, <code>/ws/robot/state</code></td></tr>
+<tr><td>Docker</td><td><code>server-handineye</code></td><td>:8002</td><td>EE 카메라 스트림/엔드포인트</td></tr>
+<tr><td>Docker</td><td><code>server-handtoeye</code></td><td>:8003</td><td>외부 카메라 스트림/엔드포인트</td></tr>
+<tr><td>Docker</td><td><code>cloudflared</code></td><td>—</td><td>외부 도메인 ↔ 로컬 nginx 터널</td></tr>
+<tr><td>Host</td><td><code>bringup_agent.py</code></td><td>:8099</td><td>Doosan bringup / skill_api 등 호스트 프로세스 관리</td></tr>
+<tr><td>Host</td><td><code>rosbridge_websocket</code></td><td>:9090</td><td>Docker 컨테이너의 ROS 2 토픽/서비스 접근 게이트웨이</td></tr>
+<tr><td>Host</td><td><code>ros2_control_node</code></td><td><code>/dsr01/controller_manager</code></td><td>하드웨어 인터페이스 + 컨트롤러 로딩</td></tr>
+<tr><td>Host</td><td><code>dsr_controller2</code></td><td><code>/dsr01/dsr_controller2</code></td><td>Doosan SDK 직접 제어 (movej, movel)</td></tr>
+<tr><td>Host</td><td><code>dsr_moveit_controller</code></td><td><code>/dsr01/dsr_moveit_controller</code></td><td>JointTrajectoryController, MoveIt 트래젝토리 수신</td></tr>
+<tr><td>Host</td><td><code>skill_api_node</code></td><td>:8765</td><td>MoveItPy 기반 픽/플레이스 스킬 HTTP API</td></tr>
+<tr><td>Host</td><td><code>gripper_node</code> 등</td><td>—</td><td>RG 그리퍼 Modbus 제어 등</td></tr>
+</table>
+
+<h2 id="frontend">프론트엔드 (React + Vite)</h2>
+
+<p>SPA로 빌드되어 nginx가 <code>/</code>에 서빙. 명령 입력은 단순 텍스트 파서 → REST 호출 흐름.</p>
+
+<pre><code>CommandInput.submit() → onSend(cmd)
+  → App.handleCommand(cmd)
+    → parsePickArgs(cmd)          // "pick X Y" / "pick -x X -y Y --cup N" 등 파싱
+    → if (!wsConnected || !robotOnline) return
+    → pickOne(x, y, opts)         // api.ts:125
+      → fetch(`${baseUrl}/api/robot/skill/pick`, POST,
+              JSON({x, y, nested_count|cup_top_z, ori?}))</code></pre>
+
+<p>
+  베이스 URL 결정 우선순위: <code>localStorage['cup_api_base']</code> →
+  <code>VITE_API_BASE_URL</code> → 디폴트 <code>https://yarr-api.simplyimg.com</code>.
+</p>
+
+<h2 id="server">FastAPI 서버 + Nginx</h2>
+
+<p>3개 도메인이 별도 컨테이너로 분리. Nginx가 prefix로 라우팅:</p>
+
+<table>
+<tr><th>Prefix</th><th>Upstream</th><th>예</th></tr>
+<tr><td><code>/api/robot/</code></td><td>robot:8001</td><td><code>/api/robot/skill/pick</code>, <code>/api/robot/position</code></td></tr>
+<tr><td><code>/api/handineye/</code></td><td>handineye:8002</td><td>EE 카메라/픽셀 좌표</td></tr>
+<tr><td><code>/api/handtoeye/</code></td><td>handtoeye:8003</td><td>외부 카메라</td></tr>
+<tr><td><code>/ws/robot/state</code>, <code>/ws/task/log</code></td><td>robot:8001</td><td>실시간 state push</td></tr>
+<tr><td><code>/ws/camera/*</code></td><td>handineye / handtoeye</td><td>이미지 스트림</td></tr>
+<tr><td><code>/</code></td><td>frontend (정적)</td><td>SPA</td></tr>
+</table>
+
+<p>
+  도메인 객체(<code>robot_domain</code> 등)는 lifespan에서 한 번 생성·주입되고, 라우터는
+  모듈 전역 참조로 사용 (FastAPI <code>Depends</code> 미사용 — 의도된 패턴).
+</p>
+
+<h3>skill_api 프록시</h3>
+<p>
+  <code>/api/robot/skill/pick</code>은 서버가 호스트 ROS 2 측의 <code>skill_api_node</code>
+  (<code>http://host.docker.internal:8765/skill/pick</code>)로 단순 프록시.
+  최초 호출 시 <code>skill_api</code>가 미기동이면 bringup_agent의
+  <code>/task/start</code>로 lazy spawn하고 <code>/status</code> ready 폴링.
+</p>
+
+<h2 id="bringup-agent">Bringup Agent</h2>
+
+<p>
+  Docker 안에서는 호스트의 ROS 2 launch / 프로세스를 직접 제어할 수 없으므로,
+  호스트에 작은 HTTP 에이전트를 띄워둠.
+  <code>server/bringup_agent.py</code>가 그것.
+</p>
+
+<table>
+<tr><th>엔드포인트</th><th>설명</th></tr>
+<tr><td><code>GET /health</code></td><td>liveness</td></tr>
+<tr><td><code>GET /status</code></td><td>bringup 상태(idle/running/failed). 외부 launch(<code>bringup_real.sh</code> 직접 실행)도 pgrep으로 감지해 노출</td></tr>
+<tr><td><code>POST /start</code> / <code>/stop</code></td><td>bringup_real / bringup_sim 시작·종료</td></tr>
+<tr><td><code>POST /task/start</code> / <code>/task/stop</code></td><td>임의의 ros2 launch task (예: <code>skill_api</code>)</td></tr>
+<tr><td><code>GET /task/status?name=skill_api</code></td><td>해당 태스크의 로그/상태</td></tr>
+</table>
+
+<p>
+  태스크 시작 명령은 다음 setup.bash들을 순차 source:
+  <code>/opt/ros/humble</code> → (있다면) <code>~/ws_moveit/install</code> →
+  <code>~/ros2_ws/install</code> → cup_stack workspace install →
+  <code>ros2 launch cup_stack &lt;cmd&gt;.launch.py</code>.
+</p>
+
+<h2 id="ros2">ROS 2 스택</h2>
+
+<h3>패키지 레이어</h3>
+<table>
+<tr><th>레이어</th><th>패키지</th><th>역할</th></tr>
+<tr><td>Doosan 드라이버</td><td><code>dsr_bringup2</code></td><td>실/가상 모드 launch (<code>dsr_bringup2_rviz.launch.py</code>)</td></tr>
+<tr><td></td><td><code>dsr_hardware2</code></td><td>DRFL 기반 SystemInterface (ros2_control)</td></tr>
+<tr><td></td><td><code>dsr_controller2</code></td><td>Doosan 전용 컨트롤러 (<code>RobotController</code>)</td></tr>
+<tr><td></td><td><code>dsr_moveit_config_m0609</code></td><td>URDF/SRDF, MoveIt 설정, JTC controllers.yaml</td></tr>
+<tr><td>애플리케이션</td><td><code>cup_stack</code></td><td>스킬/태스크 + <code>skill_api_node</code></td></tr>
+</table>
+
+<h3>토픽/네임스페이스</h3>
+<p>
+  bringup_real.sh가 호출하는 <code>dsr_bringup2_rviz.launch.py</code>는
+  <code>namespace=/dsr01</code>로 모든 노드를 띄움. 따라서:
+</p>
+<ul>
+  <li>관절 상태: <code>/dsr01/joint_states</code> (root <code>/joint_states</code> 아님)</li>
+  <li>컨트롤러 매니저: <code>/dsr01/controller_manager</code></li>
+  <li>Doosan 모션 서비스: <code>/dsr01/motion/move_line</code>, <code>movej_h2r</code>, <code>movel_h2r</code> 등</li>
+</ul>
+
+<p>
+  이 때문에 <code>moveit_py.yaml</code>의 <code>joint_state_topic</code>도
+  <code>/dsr01/joint_states</code>로 맞춰져 있음 (commit b0c03b7).
+</p>
+
+<h2 id="controllers">컨트롤러 관리 원리 (핵심)</h2>
+
+<p>
+  이 시스템은 ros2_control 기반이며 두 컨트롤러가 같은 컨트롤러 매니저에
+  공존한다. 핵심은 <strong>command interface 자원 점유 패턴이 서로 다르다</strong>는 것이다.
+</p>
+
+<h3>ros2_control 컨트롤러 라이프사이클</h3>
+
+<div class="ascii">
+       ┌────────────────────────────────────────────────────────────┐
+       │                  /dsr01/controller_manager                 │
+       │                                                            │
+       │   ┌──────────────────────┐     ┌──────────────────────┐    │
+       │   │ ResourceManager      │     │ ControllerManager    │    │
+       │   │  - hardware ifaces   │◀────┤  - load/unload       │    │
+       │   │  - command/state     │     │  - configure/activate│    │
+       │   └──────────┬───────────┘     └──────────┬───────────┘    │
+       │              │                            │                │
+       │              │ claim/release              │ load_controller │
+       └──────────────┼────────────────────────────┼────────────────┘
+                      │                            │
+              ┌───────┴────────┐         ┌─────────┴──────────┐
+              │ dsr_controller2│         │ dsr_moveit_        │
+              │ (Doosan SDK    │         │ controller (JTC)   │
+              │  직통, 자원    │         │  position 인터페이스│
+              │  미점유)        │         │  점유              │
+              └────────────────┘         └────────────────────┘
+</div>
+
+<h3>왜 두 컨트롤러가 충돌 없이 공존 가능한가</h3>
+
+<p><code>ros2 control list_controllers -v --controller-manager /dsr01/controller_manager</code> 실행 결과:</p>
+
+<pre><code>joint_state_broadcaster   joint_state_broadcaster/JointStateBroadcaster   active
+    claimed interfaces:
+    required state interfaces: joint_1/position, joint_1/velocity, ...
+dsr_controller2            dsr_controller2/RobotController                 active
+    claimed interfaces:                  ← 비어있음!
+    required command interfaces:         ← 비어있음!
+dsr_moveit_controller      joint_trajectory_controller/JointTrajectoryController  active
+    claimed interfaces: joint_1/position, joint_2/position, ...
+    (JTC가 position 인터페이스 점유)</code></pre>
+
+<p>
+  <code>dsr_controller2</code>는 ros2_control의 command interface를 <strong>전혀 claim하지 않는다</strong>.
+  대신 Doosan DRFL SDK를 통해 로봇 컨트롤러와 직접 TCP 통신.
+  반면 <code>dsr_moveit_controller</code>는 표준 JTC로 <code>position</code> command interface를 점유.
+  두 컨트롤러가 같은 리소스를 두고 다투지 않으므로 동시에 active 가능.
+</p>
+
+<h3>현재 bringup이 spawn하는 컨트롤러</h3>
+
+<p>업스트림 <code>dsr_bringup2_rviz.launch.py</code>는 <code>dsr_controller2</code>와
+<code>joint_state_broadcaster</code> 두 개만 spawn한다.
+<code>dsr_moveit_controller</code>는 <code>ros2_controllers.yaml</code>에 정의는 되어 있으나 띄우지 않음.</p>
+
+<p>Doosan 공식 <code>dsr_moveit_config_m0609/launch/demo.launch.py</code>는 셋 모두 spawn하므로,
+공식 의도된 구성은 "셋 다 active"이다.</p>
+
+<h3>cup_stack의 처방 (commit f949615)</h3>
+
+<p>업스트림 launch를 건드리지 않고 <code>skill_api.launch.py</code>에서
+<code>dsr_moveit_controller</code>를 추가 spawn한다:</p>
+
+<pre><code>dsr_moveit_controller_spawner = Node(
+    package="controller_manager",
+    executable="spawner",
+    arguments=[
+        "dsr_moveit_controller",
+        "--controller-manager", "/dsr01/controller_manager",
+    ],
+)</code></pre>
+
+<p>spawner 노드는 controller_manager 서비스를 호출해 <strong>load → configure → activate</strong>를 한 번에 수행하고 즉시 종료. 컨트롤러는 컨트롤러 매니저 내부에 등록된 상태로 남는다 (skill_api 노드 수명과 무관).</p>
+
+<h3>네임스페이스 정합 (action remap)</h3>
+
+<p>
+  MoveIt의 <code>moveit_simple_controller_manager</code>는
+  <code>moveit_controllers.yaml</code>의 controller 이름을 그대로 액션 prefix로 사용:
+  <code>/dsr_moveit_controller/follow_joint_trajectory</code>. 그러나 실제 컨트롤러는
+  <code>/dsr01/controller_manager</code> 아래에서 활성화되므로 액션 경로는
+  <code>/dsr01/dsr_moveit_controller/follow_joint_trajectory</code>.
+</p>
+
+<p>
+  <code>skill_api.launch.py</code>의 Node remappings로 5개 action 서브토픽을 매핑:
+</p>
+
+<pre><code>_fjt_remaps = [
+    (f"/dsr_moveit_controller/follow_joint_trajectory/_action/{sub}",
+     f"/dsr01/dsr_moveit_controller/follow_joint_trajectory/_action/{sub}")
+    for sub in ("send_goal", "cancel_goal", "get_result", "feedback", "status")
+]</code></pre>
+
+<p>이로써 <code>moveit_simple_controller_manager</code>의 액션 클라이언트가 정확한 서버에 연결.</p>
+
+<h2 id="trajectory">Trajectory 실행 경로</h2>
+
+<div class="ascii">
+skill_api_node (CupStackRuntime)
+   │  arm.plan(...)  ─────────────────▶ MoveItCpp (planning)
+   │                                       (Pilz PTP/LIN → 실패 시 OMPL)
+   │  robot.execute(robot_trajectory, blocking=True)
+   │     │
+   │     ▼
+trajectory_execution_manager
+   │  → moveit_simple_controller_manager
+   │     → ActionClient(/dsr_moveit_controller/follow_joint_trajectory)
+   │        ↳ remap ⇒ /dsr01/dsr_moveit_controller/follow_joint_trajectory
+   ▼
+JointTrajectoryController (dsr_moveit_controller)
+   │  position command stream (control_msgs/FollowJointTrajectory)
+   ▼
+ros2_control ResourceManager
+   │  joint_N/position command interface
+   ▼
+dsr_hardware2 (SystemInterface)
+   ▼
+Doosan DRFL  ──TCP:12345──▶ M0609 Robot Controller
+</div>
+
+<p>
+  반환 경로 — 컨트롤러는 실시간 trajectory feedback을 액션 클라이언트로 회신.
+  성공/실패는 <code>robot.execute()</code>의 bool 반환값으로 전달되며 (commit f949615) 이전엔
+  반환값을 무시해 ABORTED를 success로 위장하는 버그가 있었다.
+</p>
+
+<h3>그리퍼 경로 (별도)</h3>
+
+<p>
+  RG 그리퍼는 MoveIt 경로를 거치지 않고 별도 토픽/서비스(<code>gripper_node</code>)로
+  제어된다. 그래서 trajectory 실행이 실패해도 그리퍼는 동작했고, 이는 과거 진단을
+  혼란시킨 부수 증상.
+</p>
+
+<h2 id="pick-flow">픽 명령의 end-to-end 흐름</h2>
+
+<pre><code>1. 사용자: "pick 0.45 0.12" 입력 (또는 curl POST)
+2. Frontend: parsePickArgs → pickOne(x=0.45, y=0.12, {nestedCount:1})
+3. Frontend: POST {baseUrl}/api/robot/skill/pick
+              body: {"x":0.45, "y":0.12, "nested_count":1}
+4. Nginx: → robot:8001 컨테이너
+5. FastAPI (server/server/routers/robot.py:175): skill_pick(body)
+6. RobotDomain.pick_skill (server/server/domains/robot.py:541)
+     - skill_api ready 체크 (8765/status)
+     - 미기동이면 bringup_agent /task/start로 lazy spawn → ready 폴링
+     - HTTP POST http://host.docker.internal:8765/skill/pick
+7. skill_api_node (PickCupSkill, ros2-cup-stack):
+     [1] approach @ PICK_SAFE_Z (0.55 m)
+         → runtime.try_move_to_pose → MoveItPy plan + execute
+     [2] gripper OPEN  (별도 그리퍼 토픽)
+     [3] descend → z=pick_z_base (0.323 m)
+     [4] GRIP
+     [5] lift → PICK_SAFE_Z
+     각 step의 execute() 결과를 확인 (commit f949615) — ABORTED면 즉시 False 반환.
+8. 응답 본문: {"success": bool, "skill": "pick", "detail": "..."}
+9. Frontend: 로그에 "Pick complete" / "Pick failed" 표시.</code></pre>
+
+<h2 id="diagnostics">진단 레시피</h2>
+
+<table>
+<tr><th>증상</th><th>가장 빠른 확인</th><th>잠재 원인</th></tr>
+<tr><td>HTTP 504 / 60s timeout</td><td><code>curl :8099/task/status?name=skill_api</code></td><td>skill_api lazy 시작 실패 (모듈/포트/MoveIt init)</td></tr>
+<tr><td>"Unable to configure planning scene monitor"</td><td><code>ros2 topic hz /dsr01/joint_states</code></td><td>로봇 분리 또는 namespace mismatch</td></tr>
+<tr><td>planning 성공하나 모션 안 함</td><td><code>ros2 action info /dsr01/dsr_moveit_controller/follow_joint_trajectory</code> (Action servers: 0이면)</td><td>JTC 미spawn — <code>dsr_moveit_controller</code> 활성화 필요</td></tr>
+<tr><td>plan OK, "Action client not connected"</td><td>위와 동일 + remappings 확인</td><td>네임스페이스 정합 미설정</td></tr>
+<tr><td>API는 success인데 arm은 안 움직임</td><td>skill_api 로그에 "Trajectory execution failed" 없음</td><td>execute() 반환값 미검증 (이미 commit f949615로 수정)</td></tr>
+<tr><td>(0, 0)으로 픽 → IK 실패</td><td>"Unable to find IK solution"</td><td>M0609 베이스 직상 운동학적 특이점 — 워크스페이스 좌표 사용</td></tr>
+</table>
+
+<h3>유용한 명령</h3>
+<pre><code># 컨트롤러 목록 + 자원 점유
+ros2 control list_controllers -v --controller-manager /dsr01/controller_manager
+
+# 액션 서버 존재 확인
+ros2 action info /dsr01/dsr_moveit_controller/follow_joint_trajectory
+
+# bringup_agent로 skill_api 재기동
+curl -X POST :8099/task/stop  -d '{"command":"skill_api"}'
+curl -X POST :8099/task/start -d '{"command":"skill_api"}'
+
+# skill_api ready
+curl :8765/status
+
+# 워크스페이스 좌표로 픽 호출
+curl -X POST http://localhost/api/robot/skill/pick \
+     -H 'Content-Type: application/json' \
+     -d '{"x":0.45, "y":0.12, "nested_count":1}'
+</code></pre>
+
+<hr>
+<p class="small">
+  본 문서는 commit <code>f949615</code> 시점의 구조를 반영. 컨트롤러/네임스페이스 구성을 바꾸면
+  본 문서의 액션 경로 및 remap 정의도 함께 갱신해야 한다.
+</p>
+
+</body>
+</html>
