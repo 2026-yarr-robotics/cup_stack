@@ -47,7 +47,7 @@ class SkillStackConfig:
     spread_axis: str = "y"
     pick_safe_z: float = 0.55
     safe_z_min: float = 0.25
-    pick_z_base: float = 0.323
+    pick_z_base: float = 0.313
     cup_grip_z_offset: float = 0.10
     place_z_base: float = 0.323
     place_x_offset: float = 0.10

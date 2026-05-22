@@ -7,7 +7,7 @@ Launch arguments:
   - ``cup_grip_z_offset`` (default ``0.10`` m): vertical distance
     from cup-top centre to the gripper grip point — calibrate to
     the actual cup geometry.
-  - ``pick_z_base`` (default ``0.323`` m): gripper Z when picking
+  - ``pick_z_base`` (default ``0.313`` m): gripper Z when picking
     the top of a 1-cup nested source stack. Used by /skill/pick when
     the caller supplies ``nested_count`` instead of an explicit Z.
   - ``nest_inc`` (default ``0.012`` m): rise per additional nested
@@ -85,7 +85,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "cup_grip_z_offset", default_value="0.10"
             ),
-            DeclareLaunchArgument("pick_z_base", default_value="0.323"),
+            DeclareLaunchArgument("pick_z_base", default_value="0.313"),
             DeclareLaunchArgument("nest_inc", default_value="0.012"),
             dsr_moveit_controller_spawner,
             Node(
