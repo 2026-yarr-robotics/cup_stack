@@ -25,6 +25,7 @@ class CupStackRuntime:
         motion_config: MotionConfig | None = None,
         gripper_config: GripperConfig | None = None,
         workspace_config: WorkspaceConfig | None = None,
+        moveit_namespace: str | None = None,
     ) -> None:
         self.node = node
         self.logger = node.get_logger()
@@ -42,7 +43,21 @@ class CupStackRuntime:
             self.logger.warning(f"Gripper init failed — hardware not connected? ({e})")
             self.gripper = None
 
-        self.robot = MoveItPy(node_name=moveit_node_name)
+        # MoveItPy spins up its own rclcpp context via rclcpp::init(...) using
+        # only the launch_arguments it builds internally, so the parent
+        # process's --ros-args (including __ns:=/dsr01 from launch_ros) do NOT
+        # propagate. The internal moveit_simple_controller_manager node then
+        # lands at root and its FollowJointTrajectory action client never
+        # binds to /dsr01/dsr_moveit_controller. Passing name_space puts the
+        # primary MoveItPy node under the namespace, and a __ns remap goes
+        # into the new context's global args so every internal rclcpp node
+        # (planning_scene_monitor, controller manager, ...) inherits it.
+        ns = moveit_namespace if moveit_namespace and moveit_namespace != "/" else None
+        moveit_kwargs: dict = {"node_name": moveit_node_name}
+        if ns:
+            moveit_kwargs["name_space"] = ns
+            moveit_kwargs["remappings"] = {"__ns": ns}
+        self.robot = MoveItPy(**moveit_kwargs)
         self.arm = self.robot.get_planning_component(self.motion.group_name)
         self.robot_model = self.robot.get_robot_model()
         self.ompl_params = self._make_ompl_params()

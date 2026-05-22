@@ -443,7 +443,11 @@ def main(args=None) -> None:
             f"nest_inc={_nest_inc:.4f} m"
         )
 
-        _runtime = CupStackRuntime(node, "skill_api_moveit_py")
+        _runtime = CupStackRuntime(
+            node,
+            "skill_api_moveit_py",
+            moveit_namespace=node.get_namespace(),
+        )
 
         if move_home:
             log.info("Moving HOME before starting API server")
