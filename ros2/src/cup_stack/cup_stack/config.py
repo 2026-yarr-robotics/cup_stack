@@ -97,7 +97,7 @@ class GripperConfig:
     name: str = "rg2"
     toolcharger_ip: str = "192.168.1.1"
     toolcharger_port: int = 502
-    open_width: int = 750
+    open_width: int = 900
     grip_width: int = 450
     force: int = 120
     open_sleep_sec: float = 0.8
