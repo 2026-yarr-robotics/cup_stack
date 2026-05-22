@@ -45,7 +45,7 @@ class SkillStackConfig:
     total_cups: int = 6
     nested_count: int = 6
     spread_axis: str = "y"
-    pick_safe_z: float = 0.55
+    pick_safe_z: float = 0.45
     safe_z_min: float = 0.25
     pick_z_base: float = 0.313
     cup_grip_z_offset: float = 0.10

@@ -54,9 +54,9 @@ class PlaceCupAtSkill(Skill):
     def execute(self, pick: PickSpec | None = None) -> bool:
         """Run the full pick → travel → place cycle for one cup.
 
-        Cycle mirrors :meth:`PlaceCupSkill.execute`: open, descend, grip,
-        retreat to safe Z, traverse to place XY, descend with half-twist
-        for cup settling, release, retreat.
+        Mirrors :meth:`PlaceCupSkill.execute` step-for-step so motion
+        choreography (orientations, linear/joint moves, sleep timings)
+        stays identical — only the place pose source differs.
         """
         if pick is None:
             self.logger.error(f"SKILL {self.name}: a PickSpec is required")
@@ -69,47 +69,68 @@ class PlaceCupAtSkill(Skill):
 
         pick_ori = pick.ori or DOWN_ORI
         half_twist = make_twist_orientation(cfg.place_twist_deg / 2.0)
+        full_twist = make_twist_orientation(cfg.place_twist_deg)
 
-        # 1) Approach pick at safe Z, then descend.
+        # ── Pick ─────────────────────────────────────────────────────
+        log.info("  [1] pick XY move @ PICK_SAFE_Z")
         if not r.try_move_to_pose(
-            pick.x, pick.y, cfg.pick_safe_z, cfg.safe_z_min, ori=pick_ori
+            pick.x, pick.y, cfg.pick_safe_z, cfg.safe_z_min, ori=pick_ori,
         ):
             return False
-        r.gripper_open()
-        r.sleep(cfg.open_sleep_sec)
+        log.info("  [2] gripper OPEN")
+        r.try_open_gripper(cfg.open_sleep_sec)
+        log.info(f"  [3] pick descend -> z={pick.z:.3f}")
         if not r.try_move_to_pose(
-            pick.x, pick.y, pick.z, cfg.safe_z_min, ori=pick_ori
+            pick.x, pick.y, pick.z, cfg.safe_z_min, ori=pick_ori, lin=True,
+        ):
+            return False
+        log.info("  [4] GRIP")
+        if not r.try_grip_cup(cfg.grip_sleep_sec):
+            return False
+        log.info("  [5] lift -> PICK_SAFE_Z")
+        if not r.try_move_to_pose(
+            pick.x, pick.y, cfg.pick_safe_z, cfg.safe_z_min,
+            ori=pick_ori, lin=True,
         ):
             return False
 
-        # 2) Grip and retreat.
-        r.gripper_close()
-        r.sleep(cfg.grip_sleep_sec)
-        if not r.try_move_to_pose(
-            pick.x, pick.y, cfg.pick_safe_z, cfg.safe_z_min, ori=pick_ori
-        ):
-            return False
-
-        # 3) Travel to place XY at safe Z (gripper-down).
+        # ── Travel ───────────────────────────────────────────────────
+        log.info(
+            f"  [6] target XY move ({self.place.x:.3f},{self.place.y:.3f}) "
+            f"@ z={cfg.pick_safe_z:.3f}"
+        )
         if not r.try_move_to_pose(
             self.place.x, self.place.y, cfg.pick_safe_z, cfg.safe_z_min,
-            ori=DOWN_ORI,
         ):
             return False
 
-        # 4) Descend with half-twist for cup-on-cup settling, release.
+        # ── Place ────────────────────────────────────────────────────
+        approach_z = cfg.pick_safe_z
+        if approach_z > self.place.z:
+            mid_z = self.place.z + (approach_z - self.place.z) / 2.0
+        else:
+            mid_z = self.place.z + 0.02
+
+        log.info(f"  [7a] place mid -> z={mid_z:.3f}")
         if not r.try_move_to_pose(
-            self.place.x, self.place.y, self.place.z, cfg.safe_z_min,
+            self.place.x, self.place.y, mid_z, cfg.safe_z_min,
             ori=half_twist,
         ):
             return False
-        r.gripper_open()
-        r.sleep(cfg.release_sleep_sec)
-
-        # 5) Retreat to safe Z.
+        log.info(f"  [7b] place final -> z={self.place.z:.3f}")
         if not r.try_move_to_pose(
-            self.place.x, self.place.y, cfg.pick_safe_z, cfg.safe_z_min,
-            ori=DOWN_ORI,
+            self.place.x, self.place.y, self.place.z, cfg.safe_z_min,
+            ori=full_twist,
+        ):
+            return False
+        log.info("  [8] RELEASE")
+        r.try_release_cup(cfg.release_sleep_sec)
+
+        lift_z = max(cfg.pick_safe_z, self.place.z + 0.02)
+        log.info(f"  [9] lift -> z={lift_z:.3f}")
+        if not r.try_move_to_pose(
+            self.place.x, self.place.y, lift_z, cfg.safe_z_min,
+            ori=full_twist,
         ):
             return False
         return True
