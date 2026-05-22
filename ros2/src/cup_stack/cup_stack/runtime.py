@@ -86,8 +86,11 @@ class CupStackRuntime:
         params = PlanRequestParameters(self.robot)
         params.planning_pipeline = "pilz_industrial_motion_planner"
         params.planner_id = "LIN"
-        params.max_velocity_scaling_factor = 0.4
-        params.max_acceleration_scaling_factor = 0.2
+        # Halved from the PTP/OMPL baseline (0.4/0.2). LIN is used for
+        # descend (gripper into the cup) and lift (cup in gripper); both
+        # benefit from a smaller motion budget than free-space approach.
+        params.max_velocity_scaling_factor = 0.2
+        params.max_acceleration_scaling_factor = 0.1
         params.planning_time = 2.0
         return params
 
