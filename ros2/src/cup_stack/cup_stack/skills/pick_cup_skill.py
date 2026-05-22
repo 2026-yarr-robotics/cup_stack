@@ -73,9 +73,15 @@ class PickCupSkill(Skill):
         self.logger.info("  [2] gripper OPEN")
         self.robot.try_open_gripper(cfg.open_sleep_sec)
 
+        # Descend and lift must stay Cartesian-straight: a PTP fallback
+        # would still reach the goal but along an arced joint-space path,
+        # which knocks the cup over on the way in and risks scraping
+        # neighbouring stacks on the way out. strict=True keeps both steps
+        # LIN-only so a planning failure surfaces as a clean skill abort
+        # instead of a silent non-vertical motion.
         self.logger.info(f"  [3] descend -> z={z:.3f}")
         if not self.robot.try_move_to_pose(
-            x, y, z, cfg.safe_z_min, ori=ori, lin=True,
+            x, y, z, cfg.safe_z_min, ori=ori, lin=True, strict=True,
         ):
             return self._fail(3)
 
@@ -85,7 +91,7 @@ class PickCupSkill(Skill):
 
         self.logger.info("  [5] lift -> PICK_SAFE_Z")
         if not self.robot.try_move_to_pose(
-            x, y, cfg.pick_safe_z, cfg.safe_z_min, ori=ori, lin=True,
+            x, y, cfg.pick_safe_z, cfg.safe_z_min, ori=ori, lin=True, strict=True,
         ):
             return self._fail(5)
 
