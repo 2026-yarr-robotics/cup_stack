@@ -68,8 +68,8 @@ class CupStackRuntime:
         params = PlanRequestParameters(self.robot)
         params.planning_pipeline = "ompl"
         params.planner_id = "RRTConnect"
-        params.max_velocity_scaling_factor = 0.7
-        params.max_acceleration_scaling_factor = 0.5
+        params.max_velocity_scaling_factor = 0.4
+        params.max_acceleration_scaling_factor = 0.2
         params.planning_time = 2.0
         return params
 
@@ -77,8 +77,8 @@ class CupStackRuntime:
         params = PlanRequestParameters(self.robot)
         params.planning_pipeline = "pilz_industrial_motion_planner"
         params.planner_id = "PTP"
-        params.max_velocity_scaling_factor = 0.7
-        params.max_acceleration_scaling_factor = 0.5
+        params.max_velocity_scaling_factor = 0.4
+        params.max_acceleration_scaling_factor = 0.2
         params.planning_time = 2.0
         return params
 
@@ -86,8 +86,8 @@ class CupStackRuntime:
         params = PlanRequestParameters(self.robot)
         params.planning_pipeline = "pilz_industrial_motion_planner"
         params.planner_id = "LIN"
-        params.max_velocity_scaling_factor = 0.3
-        params.max_acceleration_scaling_factor = 0.15
+        params.max_velocity_scaling_factor = 0.4
+        params.max_acceleration_scaling_factor = 0.2
         params.planning_time = 2.0
         return params
 
