@@ -30,6 +30,14 @@ from moveit_configs_utils import MoveItConfigsBuilder
 # parent ROS node itself under /dsr01.  Then relative name resolution does
 # the right thing without launch-level remappings (which don't propagate to
 # the controller_manager's internal node).
+#
+# launch_ros' `namespace=` only applies `-r __ns:=/dsr01` to the primary
+# rclpy node; MoveItPy spins up its own rclcpp nodes (the controller
+# manager among them) which ignore that arg and land at root. Setting
+# ROS_NAMESPACE in the process env forces every rclcpp node created in
+# this process under /dsr01, so the simple_controller_manager's action
+# client resolves to /dsr01/dsr_moveit_controller/follow_joint_trajectory
+# and actually binds to the bringup_real action server.
 ROBOT_NAMESPACE = "/dsr01"
 
 
@@ -87,6 +95,7 @@ def generate_launch_description():
                 executable="skill_api_server",
                 namespace=ROBOT_NAMESPACE,
                 output="screen",
+                additional_env={"ROS_NAMESPACE": ROBOT_NAMESPACE},
                 parameters=[
                     moveit_config.to_dict(),
                     moveit_py_params,
