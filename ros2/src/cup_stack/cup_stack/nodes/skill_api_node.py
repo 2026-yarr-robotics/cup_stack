@@ -32,9 +32,11 @@ except ImportError as exc:
     ) from exc
 
 from cup_stack.runtime import CupStackRuntime
-from cup_stack.skills.config import SkillStackConfig
+from cup_stack.skills.config import DOWN_ORI, SkillStackConfig
 from cup_stack.skills.pick_cup_skill import PickCupSkill
+from cup_stack.skills.place_cup_at import PlaceCupAtSkill, PlaceSpec
 from cup_stack.skills.pyramid_plan import PyramidStackPlan, SourceStack
+from cup_stack.skills.base import PickSpec
 from cup_stack.skills.scan_skill import ScanSkill
 
 # Relative under /dsr01; resolves to /dsr01/dsr_moveit_controller/...
@@ -271,6 +273,24 @@ class PyramidRequest(BaseModel):
     per_step: list[PerStepSource] | None = None
 
 
+class PyramidStepRequest(BaseModel):
+    """Body for POST /skill/pyramid_step — one cup, absolute place pose.
+
+    Server-side state (pyramid center, yaw, pick_z) is resolved by the
+    HTTP caller (cup-stack-server), so this endpoint receives only
+    fully-resolved absolute coordinates.  ``slot`` is a logging tag only.
+    """
+
+    x: float
+    y: float
+    pick_z: float
+    place_x: float
+    place_y: float
+    place_z: float
+    slot: str = ""
+    ori: dict | None = None
+
+
 class SkillResponse(BaseModel):
     """Uniform response for all skill endpoints."""
 
@@ -418,6 +438,37 @@ def skill_pyramid(req: PyramidRequest) -> SkillResponse:
                     detail=f"step {i} ({skill.name}) failed",
                 )
         return SkillResponse(success=True, skill="pyramid")
+    finally:
+        _lock.release()
+
+
+@app.post("/skill/pyramid_step", response_model=SkillResponse)
+def skill_pyramid_step(req: PyramidStepRequest) -> SkillResponse:
+    """Pick one cup and place it at a server-supplied absolute XYZ.
+
+    The HTTP caller (cup-stack-server) holds the pyramid config
+    (center, yaw, pick_z) and computes the absolute place pose for the
+    requested slot; this endpoint just runs one PlaceCupAtSkill.
+    """
+
+    _require_ready()
+    _check_busy()
+    try:
+        pick = PickSpec(
+            x=req.x, y=req.y, z=req.pick_z, ori=req.ori or DOWN_ORI,
+        )
+        place = PlaceSpec(
+            x=req.place_x, y=req.place_y, z=req.place_z,
+            name=req.slot or "pyramid_step",
+        )
+        skill = PlaceCupAtSkill(_runtime, place)
+        ok = skill.execute(pick)
+        detail = (
+            f"slot={req.slot or '?'} "
+            f"pick=({req.x:.3f},{req.y:.3f},{req.pick_z:.3f}) "
+            f"place=({req.place_x:.3f},{req.place_y:.3f},{req.place_z:.3f})"
+        )
+        return SkillResponse(success=ok, skill="pyramid", detail=detail)
     finally:
         _lock.release()
 
