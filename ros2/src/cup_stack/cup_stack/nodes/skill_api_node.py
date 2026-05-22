@@ -16,6 +16,8 @@ POST /skill/scan   -- launch the existing scan node
 import threading
 
 import rclpy
+from control_msgs.action import FollowJointTrajectory
+from rclpy.action import ActionClient
 from rclpy.node import Node
 
 try:
@@ -34,6 +36,9 @@ from cup_stack.skills.config import SkillStackConfig
 from cup_stack.skills.pick_cup_skill import PickCupSkill
 from cup_stack.skills.pyramid_plan import PyramidStackPlan, SourceStack
 from cup_stack.skills.scan_skill import ScanSkill
+
+# Relative under /dsr01; resolves to /dsr01/dsr_moveit_controller/...
+_FJT_ACTION_NAME = "dsr_moveit_controller/follow_joint_trajectory"
 
 
 # ---------------------------------------------------------------------------
@@ -286,12 +291,28 @@ _cup_grip_z_offset: float = SkillStackConfig().cup_grip_z_offset
 # an explicit Z.  Defaults mirror SkillStackConfig + cup_pyramid.launch.py.
 _pick_z_base: float = SkillStackConfig().pick_z_base
 _nest_inc: float = 0.012
+# Set True once dsr_moveit_controller/follow_joint_trajectory action server
+# is reachable.  /status's ``ready`` flag and skill endpoints gate on this so
+# the spawner-vs-skill_api startup race no longer leaks ABORTED picks.
+_controller_ready: bool = False
 
 
 def _check_busy() -> None:
     if not _lock.acquire(blocking=False):
         raise HTTPException(
             status_code=409, detail="a skill is already running"
+        )
+
+
+def _require_ready() -> None:
+    if _runtime is None or not _controller_ready:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "skill_api not ready: "
+                f"runtime={'ok' if _runtime is not None else 'pending'}, "
+                f"controller={'ok' if _controller_ready else 'pending'}"
+            ),
         )
 
 
@@ -307,7 +328,9 @@ def status() -> dict:
     """Return server liveness, busy state, and pick-Z geometry."""
 
     return {
-        "ready": _runtime is not None,
+        "ready": _runtime is not None and _controller_ready,
+        "runtime_ready": _runtime is not None,
+        "controller_ready": _controller_ready,
         "busy": _lock.locked(),
         "cup_grip_z_offset": _cup_grip_z_offset,
         "pick_z_base": _pick_z_base,
@@ -346,6 +369,7 @@ def skill_pick(req: PickRequest) -> SkillResponse:
     """
 
     pick_z, detail = _resolve_pick_z(req)
+    _require_ready()
     _check_busy()
     try:
         skill = PickCupSkill(_runtime, req.x, req.y, pick_z, ori=req.ori)
@@ -359,6 +383,7 @@ def skill_pick(req: PickRequest) -> SkillResponse:
 def skill_pyramid(req: PyramidRequest) -> SkillResponse:
     """Run the full 6-cup 3-2-1 pyramid sequence."""
 
+    _require_ready()
     _check_busy()
     try:
         config = SkillStackConfig(
@@ -414,6 +439,31 @@ def skill_scan() -> SkillResponse:
 # ROS 2 node entry point
 # ---------------------------------------------------------------------------
 
+def _watch_controller_ready(node: Node) -> None:
+    """Set ``_controller_ready`` once the FollowJointTrajectory server appears.
+
+    The spawner that loads ``dsr_moveit_controller`` runs in parallel with
+    skill_api_node and lags MoveItPy init by ~10 s.  Until the action server
+    is up, any pick MoveIt sends out aborts with
+    ``Action client not connected to action server``.  Poll on a short
+    timeout so /status reflects controller availability in near-real-time.
+    """
+    global _controller_ready
+    client = ActionClient(node, FollowJointTrajectory, _FJT_ACTION_NAME)
+    log = node.get_logger()
+    log.info(f"waiting for {_FJT_ACTION_NAME} action server")
+    try:
+        while rclpy.ok():
+            if client.wait_for_server(timeout_sec=1.0):
+                _controller_ready = True
+                log.info(
+                    f"{_FJT_ACTION_NAME} is up; skill_api now accepting picks"
+                )
+                return
+    finally:
+        client.destroy()
+
+
 def main(args=None) -> None:
     """Run the skill API server node."""
 
@@ -462,6 +512,11 @@ def main(args=None) -> None:
                 "app": app, "host": host, "port": port,
                 "log_level": "info",
             },
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=_watch_controller_ready,
+            args=(node,),
             daemon=True,
         ).start()
 
