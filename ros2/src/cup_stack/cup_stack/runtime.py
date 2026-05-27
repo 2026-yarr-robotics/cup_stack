@@ -69,7 +69,11 @@ class CupStackRuntime:
         params.planning_pipeline = "ompl"
         params.planner_id = "RRTConnect"
         params.max_velocity_scaling_factor = 0.4
-        params.max_acceleration_scaling_factor = 0.2
+        # Lowered from 0.2 -> 0.1 -> 0.08 to suppress harmonic-drive "click"
+        # caused by the trapezoidal-profile jerk step at trajectory boundaries.
+        # PTP path and its OMPL fallback share this value so behaviour is
+        # consistent.
+        params.max_acceleration_scaling_factor = 0.08
         params.planning_time = 2.0
         return params
 
@@ -78,7 +82,7 @@ class CupStackRuntime:
         params.planning_pipeline = "pilz_industrial_motion_planner"
         params.planner_id = "PTP"
         params.max_velocity_scaling_factor = 0.4
-        params.max_acceleration_scaling_factor = 0.2
+        params.max_acceleration_scaling_factor = 0.08
         params.planning_time = 2.0
         return params
 
