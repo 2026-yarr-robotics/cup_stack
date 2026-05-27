@@ -94,9 +94,13 @@ class PlaceCupSkill(Skill):
 
         if not self._pick(pick, pick_ori):
             return False
-        if not self._travel(place_x, place_y):
+        travel_z = max(
+            self.config.pick_safe_z,
+            place_z + self.config.layer_height + 0.03,
+        )
+        if not self._travel(pick, place_x, place_y, travel_z, pick_ori):
             return False
-        return self._place(place_x, place_y, place_z)
+        return self._place(place_x, place_y, place_z, travel_z)
 
     def _pick(self, pick: PickSpec, pick_ori: dict[str, float]) -> bool:
         cfg = self.config
@@ -136,10 +140,29 @@ class PlaceCupSkill(Skill):
             5,
         )
 
-    def _travel(self, place_x: float, place_y: float) -> bool:
+    def _travel(
+        self,
+        pick: PickSpec,
+        place_x: float,
+        place_y: float,
+        travel_z: float,
+        pick_ori: dict[str, float],
+    ) -> bool:
         cfg = self.config
-        # Keep PICK_SAFE_Z during the diagonal move (no extra lift).
-        travel_z = cfg.pick_safe_z
+        # For upper-layer slots (2l/2r/3m) the place height sits at or
+        # above pick_safe_z, so a lateral move at pick_safe_z drags the
+        # held cup straight through cups already placed on the layer
+        # below. Lift vertically (LIN) above place_z first, then travel.
+        if travel_z > cfg.pick_safe_z:
+            self.logger.info(f"  [5b] extra lift -> z={travel_z:.3f}")
+            if not self._step(
+                self.robot.try_move_to_pose(
+                    pick.x, pick.y, travel_z, cfg.safe_z_min,
+                    ori=pick_ori, lin=True,
+                ),
+                "5b",
+            ):
+                return False
         self.logger.info(
             f"  [6] target XY move ({place_x:.3f},{place_y:.3f}) "
             f"@ z={travel_z:.3f}"
@@ -152,10 +175,13 @@ class PlaceCupSkill(Skill):
         )
 
     def _place(
-        self, place_x: float, place_y: float, place_z: float
+        self,
+        place_x: float,
+        place_y: float,
+        place_z: float,
+        approach_z: float,
     ) -> bool:
         cfg = self.config
-        approach_z = cfg.pick_safe_z
         if approach_z > place_z:
             # Descending onto a lower layer (L0/L1).
             mid_z = place_z + (approach_z - place_z) / 2.0

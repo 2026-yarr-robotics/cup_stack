@@ -95,17 +95,30 @@ class PlaceCupAtSkill(Skill):
             return False
 
         # ── Travel ───────────────────────────────────────────────────
+        # For upper-layer slots (2l/2r/3m) the place height is at or above
+        # pick_safe_z, so a lateral move at pick_safe_z drags the held cup
+        # straight through cups already placed on the layer below. Lift
+        # vertically (LIN) one full layer above place.z first (cup body
+        # ≈ layer_height), then travel laterally, then descend.
+        travel_z = max(cfg.pick_safe_z, self.place.z + cfg.layer_height + 0.03)
+        if travel_z > cfg.pick_safe_z:
+            log.info(f"  [5b] extra lift -> z={travel_z:.3f}")
+            if not r.try_move_to_pose(
+                pick.x, pick.y, travel_z, cfg.safe_z_min,
+                ori=pick_ori, lin=True,
+            ):
+                return False
         log.info(
             f"  [6] target XY move ({self.place.x:.3f},{self.place.y:.3f}) "
-            f"@ z={cfg.pick_safe_z:.3f}"
+            f"@ z={travel_z:.3f}"
         )
         if not r.try_move_to_pose(
-            self.place.x, self.place.y, cfg.pick_safe_z, cfg.safe_z_min,
+            self.place.x, self.place.y, travel_z, cfg.safe_z_min,
         ):
             return False
 
         # ── Place ────────────────────────────────────────────────────
-        approach_z = cfg.pick_safe_z
+        approach_z = travel_z
         if approach_z > self.place.z:
             mid_z = self.place.z + (approach_z - self.place.z) / 2.0
         else:
