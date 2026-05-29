@@ -1,13 +1,20 @@
 """Launch the rectangular scan task with MoveItPy parameters."""
 
 from launch import LaunchDescription
-from launch.substitutions import PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from moveit_configs_utils import MoveItConfigsBuilder
 
 
 def generate_launch_description():
+    # Run scan under the robot namespace so its MoveItPy controller manager
+    # binds to /<ns>/dsr_moveit_controller. Must match the bringup namespace
+    # (default dsr01); otherwise every move ABORTs with "Action client not
+    # connected to action server".
+    namespace = LaunchConfiguration("name")
+
     moveit_config = (
         MoveItConfigsBuilder(
             robot_name="m0609",
@@ -29,9 +36,15 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "name",
+                default_value="dsr01",
+                description="Robot namespace; must match the bringup",
+            ),
             Node(
                 package="cup_stack",
                 executable="scan",
+                namespace=namespace,
                 output="screen",
                 parameters=[
                     moveit_config.to_dict(),

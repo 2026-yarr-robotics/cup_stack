@@ -66,11 +66,19 @@ class ScanTask:
             self.logger.error(f"  {label} 계획 실패")
             return False
 
-        rt.robot.execute(
+        exec_result = rt.robot.execute(
             group_name=rt.motion.group_name,
             robot_trajectory=plan_result.trajectory,
             blocking=True,
         )
+        # MoveItPy returns falsy on ABORTED/FAILED/PREEMPTED. Without this
+        # check an aborted move (e.g. controller action client not connected)
+        # leaked through as success and the task reported completion while
+        # the robot never moved.
+        if not exec_result:
+            self.logger.error(f"  {label} 실행 실패 (ABORTED)")
+            return False
+
         arrived = self._current_joints_rad()
         self._log_joints("도달", arrived)
 
