@@ -10,7 +10,8 @@ GET  /             -- pick frontend (HTML)
 GET  /status       -- liveness, busy, and cup_grip_z_offset
 POST /skill/pick   -- pick a cup; accepts gripper Z or cup-top Z
 POST /skill/pyramid -- run the full 6-cup pyramid sequence
-POST /skill/scan   -- launch the existing scan node
+POST /skill/scan   -- launch the existing 2-direction scan node
+POST /skill/scan_square -- launch the 4-corner square scan node
 """
 
 import threading
@@ -482,6 +483,28 @@ def skill_scan() -> SkillResponse:
         skill = ScanSkill(logger=_runtime.logger)
         ok = skill.execute()
         return SkillResponse(success=ok, skill="scan")
+    finally:
+        _lock.release()
+
+
+@app.post("/skill/scan_square", response_model=SkillResponse)
+def skill_scan_square() -> SkillResponse:
+    """Launch the 4-corner square scan node and wait for completion.
+
+    Camera stays fixed downward; the EE traces an axis-aligned rectangle in
+    XY at the HOME EE height, then returns to the start pose. Reuses the
+    generic ScanSkill wrapper pointed at ``scan_square.launch.py``.
+    """
+
+    _check_busy()
+    try:
+        skill = ScanSkill(
+            logger=_runtime.logger,
+            launch_file="scan_square.launch.py",
+            success_marker="Square scan complete",
+        )
+        ok = skill.execute()
+        return SkillResponse(success=ok, skill="scan_square")
     finally:
         _lock.release()
 

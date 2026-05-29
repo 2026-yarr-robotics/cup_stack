@@ -84,6 +84,19 @@ class ScanConfig:
     # 각 PTP 웨이포인트 도달 후 대기 시간 (초)
     dwell_sec: float = 5.0
 
+    # ── 4방향 사각형 스캔 (scan square) ───────────────────────────────
+    # 2방향(pos1/pos2) 스캔과 달리, 카메라를 계속 하향(DOWN_ORI)으로 고정한
+    # 채 base_link XY 평면에서 축 정렬 사각형의 네 꼭짓점을 순회한다. Z 는
+    # HOME 자세의 EE 높이(런타임 FK)를 그대로 사용하고, 시작/복귀 위치는
+    # 2방향 스캔과 동일하게 시작 시점의 joint 자세를 캡처해 마지막에 복귀한다.
+    #
+    # 수정 방법: 로봇을 사각형 중심 위로 이동시킨 뒤 EE (x, y) 를 echo 해
+    #   square_center_x/y 로 교체하고, 한 변 길이를 square_size 로 조정.
+    #     ros2 topic echo /ee_pose --once
+    square_center_x: float = 0.45   # 사각형 중심 X (base_link, m)
+    square_center_y: float = 0.0    # 사각형 중심 Y (base_link, m)
+    square_size: float = 0.20       # 사각형 한 변 길이 (m)
+
     @property
     def pos1_joints_rad(self) -> list[float]:
         return [math.radians(d) for d in self.pos1_joints_deg]
@@ -91,6 +104,22 @@ class ScanConfig:
     @property
     def pos2_joints_rad(self) -> list[float]:
         return [math.radians(d) for d in self.pos2_joints_deg]
+
+    @property
+    def square_corners_xy(self) -> tuple[tuple[float, float], ...]:
+        """사각형 네 꼭짓점 (x, y) — 중심 ± size/2, CCW 순회.
+
+        순서: 좌하 → 우하 → 우상 → 좌상. ScanSquareTask 가 이 순서대로
+        LIN 으로 변을 그린 뒤 첫 꼭짓점으로 돌아와 둘레를 닫는다.
+        """
+        cx, cy = self.square_center_x, self.square_center_y
+        h = self.square_size / 2.0
+        return (
+            (cx - h, cy - h),
+            (cx + h, cy - h),
+            (cx + h, cy + h),
+            (cx - h, cy + h),
+        )
 
 
 @dataclass(frozen=True)
