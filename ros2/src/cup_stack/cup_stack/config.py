@@ -81,6 +81,9 @@ class ScanConfig:
         -18.8562,   # J6
     )
 
+    # 각 PTP 웨이포인트 도달 후 대기 시간 (초)
+    dwell_sec: float = 5.0
+
     @property
     def pos1_joints_rad(self) -> list[float]:
         return [math.radians(d) for d in self.pos1_joints_deg]

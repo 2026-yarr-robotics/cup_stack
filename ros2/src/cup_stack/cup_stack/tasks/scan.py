@@ -7,6 +7,7 @@ Sequence
 """
 
 import math
+import time
 
 import numpy as np
 from moveit.core.robot_state import RobotState
@@ -72,6 +73,11 @@ class ScanTask:
         )
         arrived = self._current_joints_rad()
         self._log_joints("도달", arrived)
+
+        dwell = max(0.0, float(self.cfg.dwell_sec))
+        if dwell > 0.0:
+            self.logger.info(f"  대기 {dwell:.2f}s")
+            time.sleep(dwell)
         return True
 
     def try_execute(self) -> bool:
