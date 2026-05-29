@@ -268,6 +268,13 @@ class CupStackRuntime:
 
         return self.try_open_gripper(sleep_sec)
 
+    # Aliases used by place_cup_at (which times its own sleeps via r.sleep()).
+    def gripper_open(self) -> bool:
+        return self.try_open_gripper(0.0)
+
+    def gripper_close(self) -> bool:
+        return self.try_grip_cup(0.0)
+
     def log_grip_status(self) -> None:
         """Read gripper status if available and log it."""
 
