@@ -1,0 +1,112 @@
+"""Launch the fallen-cup recovery (stand-up) task under the robot namespace.
+
+Wrapper around ``dsr_practice/launch/stand_fallen_cup.launch.py`` (from the
+fallen-cup-recovery repo, symlinked into this workspace) that:
+
+  1. spawns ``dsr_moveit_controller`` against ``/<ns>/controller_manager``
+     (bringup only spawns dsr_controller2 — same trick as skill_api.launch.py),
+  2. pushes the robot namespace (default ``dsr01``) onto the included node, and
+  3. passes ``robot_namespace`` so the node hands ``name_space`` + ``__ns``
+     remap to MoveItPy — launch-side namespacing alone does NOT reach
+     MoveItPy's internal rclcpp context (see cup_stack/runtime.py).
+
+One-shot task: senses /fallen_cup/* topics published by the
+``fallen_cup_detect`` service, picks up the fallen cup(s), stands them, then
+returns HOME and exits.
+
+Launched by the dashboard server as the ``fallen_cup_recovery`` TASK command.
+"""
+
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node, PushRosNamespace
+from launch_ros.substitutions import FindPackageShare
+
+
+def generate_launch_description():
+    namespace = LaunchConfiguration("name")
+
+    inner_launch = PathJoinSubstitution(
+        [FindPackageShare("dsr_practice"), "launch", "stand_fallen_cup.launch.py"]
+    )
+
+    # Bringup (dsr_bringup2) spawns only dsr_controller2. MoveIt needs a
+    # standard FollowJointTrajectory controller, so activate
+    # dsr_moveit_controller against the namespaced controller_manager.
+    # Identical to the spawner in skill_api.launch.py.
+    dsr_moveit_controller_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[
+            "dsr_moveit_controller",
+            "--controller-manager",
+            ["/", namespace, "/controller_manager"],
+        ],
+        output="screen",
+    )
+
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument(
+                "name",
+                default_value="dsr01",
+                description="Robot namespace; must match the bringup",
+            ),
+            DeclareLaunchArgument(
+                "mode",
+                default_value="drop",
+                description="lift 후 동작: 'drop' | 'place'",
+            ),
+            DeclareLaunchArgument(
+                "multi_cup",
+                default_value="false",
+                description="여러 fallen cup 순차 처리",
+            ),
+            DeclareLaunchArgument(
+                "multi_cup_max_iterations",
+                default_value="10",
+                description="multi_cup 모드 안전 limit",
+            ),
+            DeclareLaunchArgument(
+                "dry_run",
+                default_value="false",
+                description="approach까지만 (gripper/descend/lift 스킵)",
+            ),
+            DeclareLaunchArgument(
+                "sim",
+                default_value="false",
+                description="카메라/그리퍼 HW 우회 (MoveIt virtual용)",
+            ),
+            DeclareLaunchArgument(
+                "cup_yaw_override_deg",
+                default_value="nan",
+                description="NaN이 아니면 인식 yaw 무시하고 강제 값 사용",
+            ),
+            dsr_moveit_controller_spawner,
+            GroupAction(
+                [
+                    PushRosNamespace(namespace),
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(inner_launch),
+                        launch_arguments={
+                            "mode": LaunchConfiguration("mode"),
+                            "multi_cup": LaunchConfiguration("multi_cup"),
+                            "multi_cup_max_iterations": LaunchConfiguration(
+                                "multi_cup_max_iterations"
+                            ),
+                            "dry_run": LaunchConfiguration("dry_run"),
+                            "sim": LaunchConfiguration("sim"),
+                            "cup_yaw_override_deg": LaunchConfiguration(
+                                "cup_yaw_override_deg"
+                            ),
+                            # MoveItPy는 launch namespace를 못 받으므로 노드가
+                            # name_space + __ns remap을 직접 넘기도록 전달.
+                            "robot_namespace": ["/", namespace],
+                        }.items(),
+                    ),
+                ]
+            ),
+        ]
+    )
