@@ -34,12 +34,12 @@ class MotionConfig:
     base_frame: str = "base_link"
     ee_link: str = "link_6"
     home_joints_deg: tuple[float, ...] = (
-        -12.4849,
-        24.8886,
-        52.5965,
-        0.0239,
-        102.5033,
-        -12.4914,
+        -0.7922,
+        11.7405,
+        72.7817,
+        0.0234,
+        95.4661,
+        -0.8017,
     )
 
     @property
