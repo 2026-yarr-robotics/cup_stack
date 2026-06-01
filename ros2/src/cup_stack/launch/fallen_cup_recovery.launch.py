@@ -84,22 +84,6 @@ def generate_launch_description():
                 default_value="nan",
                 description="NaN이 아니면 인식 yaw 무시하고 강제 값 사용",
             ),
-            # ── 이 워크스페이스 전용 안전 기본값 ──────────────────────────
-            # dsr_practice의 TABLE_Z(0.05)·BASE_OFFSET_Z(0.08)·핸드아이 캘리브는
-            # 원저자 셋업 실측값이라 본 셋업과 오차가 있다. place(standing) 시
-            # 그리퍼-바닥 충돌이 실제 발생했으므로 (2026-06-01) 보수적 기본값 적용.
-            DeclareLaunchArgument(
-                "stand_cup_margin_m",
-                default_value="0.05",
-                description="컵 바닥-테이블 여유 (m). dsr_practice 기본 -0.05 대신 "
-                            "+0.05 (원저자 권장 하한) — closing_z를 10cm 올림",
-            ),
-            DeclareLaunchArgument(
-                "place_safe_z_min",
-                default_value="0.15",
-                description="place(standing) flange 최저 안전 z (m). 이보다 낮게 "
-                            "계산되면 클램프 — 그리퍼-바닥 충돌 방지",
-            ),
             dsr_moveit_controller_spawner,
             GroupAction(
                 [
@@ -116,13 +100,6 @@ def generate_launch_description():
                             "sim": LaunchConfiguration("sim"),
                             "cup_yaw_override_deg": LaunchConfiguration(
                                 "cup_yaw_override_deg"
-                            ),
-                            # 안전 파라미터 (위 안전 기본값 또는 사용자 지정값)
-                            "stand_cup_margin_m": LaunchConfiguration(
-                                "stand_cup_margin_m"
-                            ),
-                            "place_safe_z_min": LaunchConfiguration(
-                                "place_safe_z_min"
                             ),
                             # MoveItPy는 launch namespace를 못 받으므로 노드가
                             # name_space + __ns remap을 직접 넘기도록 전달.
