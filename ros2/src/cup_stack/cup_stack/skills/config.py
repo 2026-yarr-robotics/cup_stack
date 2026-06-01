@@ -47,6 +47,16 @@ class SkillStackConfig:
     spread_axis: str = "y"
     pick_safe_z: float = 0.45
     safe_z_min: float = 0.25
+    # Ceiling for the lateral travel altitude while holding a cup.  Kept
+    # just below the 0.55 workspace safe zone (server WorkspaceLimits
+    # z_max): above it the M0609 with a down-facing EE is at the edge of
+    # its reach, so Pilz planning degrades and place accuracy suffers.
+    # 0.545 still clears the tier-2 cup tops (gripper-equivalent 0.513)
+    # by ~32 mm, so the held top cup cannot knock them over.
+    travel_z_max: float = 0.545
+    # Minimum clearance kept between travel_z and the slot's place_z so
+    # the held cup never drags across the layer it will be placed onto.
+    travel_clearance: float = 0.03
     pick_z_base: float = 0.313
     cup_grip_z_offset: float = 0.10
     place_z_base: float = 0.323

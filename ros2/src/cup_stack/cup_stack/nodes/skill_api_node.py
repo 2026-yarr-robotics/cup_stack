@@ -449,29 +449,61 @@ def skill_pyramid_step(req: PyramidStepRequest) -> SkillResponse:
 
     The HTTP caller (cup-stack-server) holds the pyramid config
     (center, yaw, pick_z) and computes the absolute place pose for the
-    requested slot; this endpoint just runs one PlaceCupAtSkill.
+    requested slot; this endpoint runs one PlaceCupAtSkill.
+
+    The response is sent as soon as the cup is **released at its place
+    pose** (step 8) — not after the final lift — so the caller gets the
+    completion status at place time.  The lift keeps running in a
+    background thread; ``busy`` stays ``true`` (and concurrent skill
+    requests get 409) until the whole motion finishes.
     """
 
     _require_ready()
     _check_busy()
-    try:
-        pick = PickSpec(
-            x=req.x, y=req.y, z=req.pick_z, ori=req.ori or DOWN_ORI,
-        )
-        place = PlaceSpec(
-            x=req.place_x, y=req.place_y, z=req.place_z,
-            name=req.slot or "pyramid_step",
-        )
-        skill = PlaceCupAtSkill(_runtime, place)
-        ok = skill.execute(pick)
-        detail = (
-            f"slot={req.slot or '?'} "
-            f"pick=({req.x:.3f},{req.y:.3f},{req.pick_z:.3f}) "
-            f"place=({req.place_x:.3f},{req.place_y:.3f},{req.place_z:.3f})"
-        )
-        return SkillResponse(success=ok, skill="pyramid", detail=detail)
-    finally:
-        _lock.release()
+
+    detail = (
+        f"slot={req.slot or '?'} "
+        f"pick=({req.x:.3f},{req.y:.3f},{req.pick_z:.3f}) "
+        f"place=({req.place_x:.3f},{req.place_y:.3f},{req.place_z:.3f})"
+    )
+
+    placed = threading.Event()
+    finished = threading.Event()
+    outcome = {"ok": False, "error": ""}
+
+    def _run() -> None:
+        try:
+            pick = PickSpec(
+                x=req.x, y=req.y, z=req.pick_z, ori=req.ori or DOWN_ORI,
+            )
+            place = PlaceSpec(
+                x=req.place_x, y=req.place_y, z=req.place_z,
+                name=req.slot or "pyramid_step",
+            )
+            skill = PlaceCupAtSkill(_runtime, place)
+            outcome["ok"] = skill.execute(pick, on_placed=placed.set)
+        except Exception as exc:  # noqa: BLE001 - report via response
+            outcome["error"] = str(exc)
+            _runtime.logger.error(f"pyramid_step failed: {exc}")
+        finally:
+            finished.set()
+            _lock.release()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    # Reply at place time (release) or, on failure before the place,
+    # when the skill aborts.
+    while not placed.wait(timeout=0.2):
+        if finished.is_set():
+            err = f" error={outcome['error']}" if outcome["error"] else ""
+            return SkillResponse(
+                success=outcome["ok"], skill="pyramid",
+                detail=f"{detail}{err}",
+            )
+    return SkillResponse(
+        success=True, skill="pyramid",
+        detail=f"{detail} (placed; final lift in progress)",
+    )
 
 
 @app.post("/skill/scan", response_model=SkillResponse)

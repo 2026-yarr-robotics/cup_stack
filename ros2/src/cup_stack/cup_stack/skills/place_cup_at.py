@@ -8,6 +8,7 @@ mirrors ``PlaceCupSkill`` so behaviour stays identical.
 """
 
 from dataclasses import dataclass
+from typing import Callable
 
 from cup_stack.skills.base import PickSpec, RobotIO, Skill
 from cup_stack.skills.config import DOWN_ORI, SkillStackConfig
@@ -51,12 +52,20 @@ class PlaceCupAtSkill(Skill):
             f"({self.place.x:.3f},{self.place.y:.3f},{self.place.z:.3f})"
         )
 
-    def execute(self, pick: PickSpec | None = None) -> bool:
+    def execute(
+        self,
+        pick: PickSpec | None = None,
+        on_placed: Callable[[], None] | None = None,
+    ) -> bool:
         """Run the full pick → travel → place cycle for one cup.
 
         Mirrors :meth:`PlaceCupSkill.execute` step-for-step so motion
         choreography (orientations, linear/joint moves, sleep timings)
         stays identical — only the place pose source differs.
+
+        ``on_placed`` is invoked right after the cup is released at its
+        place pose (step 8), before the final lift.  Callers can use it
+        to report completion at place time while the lift finishes.
         """
         if pick is None:
             self.logger.error(f"SKILL {self.name}: a PickSpec is required")
@@ -100,7 +109,16 @@ class PlaceCupAtSkill(Skill):
         # straight through cups already placed on the layer below. Lift
         # vertically (LIN) one full layer above place.z first (cup body
         # ≈ layer_height), then travel laterally, then descend.
+        #
+        # Capped at travel_z_max (just below the 0.55 workspace safe zone):
+        # uncapped, the top slot (3m, place_z=0.513) asked for 0.638, where
+        # the M0609 with a down-facing EE is at the edge of its reach and
+        # placement accuracy degrades. The cap still clears the tier-2 cup
+        # tops (= 3m's place_z) by travel_z_max - place_z ≈ 32 mm.
         travel_z = max(cfg.pick_safe_z, self.place.z + cfg.layer_height + 0.03)
+        travel_z = min(travel_z, cfg.travel_z_max)
+        # Never travel below the support layer the cup will be placed onto.
+        travel_z = max(travel_z, self.place.z + cfg.travel_clearance)
         if travel_z > cfg.pick_safe_z:
             log.info(f"  [5b] extra lift -> z={travel_z:.3f}")
             if not r.try_move_to_pose(
@@ -138,6 +156,11 @@ class PlaceCupAtSkill(Skill):
             return False
         log.info("  [8] RELEASE")
         r.try_release_cup(cfg.release_sleep_sec)
+        if on_placed is not None:
+            try:
+                on_placed()
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warn(f"on_placed callback failed: {exc}")
 
         lift_z = max(cfg.pick_safe_z, self.place.z + 0.02)
         log.info(f"  [9] lift -> z={lift_z:.3f}")

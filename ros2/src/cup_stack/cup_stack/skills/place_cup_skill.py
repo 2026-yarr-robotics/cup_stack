@@ -94,10 +94,17 @@ class PlaceCupSkill(Skill):
 
         if not self._pick(pick, pick_ori):
             return False
+        # Lift above the layer below before lateral travel, but cap at
+        # travel_z_max (just below the 0.55 workspace safe zone): uncapped,
+        # the top slot asked for ~0.638 where the M0609 with a down-facing
+        # EE is at the edge of its reach and place accuracy degrades. The
+        # cap still clears the tier-2 cup tops by ~32 mm.
         travel_z = max(
             self.config.pick_safe_z,
             place_z + self.config.layer_height + 0.03,
         )
+        travel_z = min(travel_z, self.config.travel_z_max)
+        travel_z = max(travel_z, place_z + self.config.travel_clearance)
         if not self._travel(pick, place_x, place_y, travel_z, pick_ori):
             return False
         return self._place(place_x, place_y, place_z, travel_z)
